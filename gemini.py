@@ -13,8 +13,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 徹底移除所有 st.markdown(..., unsafe_allowed_html=True)，絕不踩 Python 3.14 的底層相容 Bug
-
 # ==========================================
 # 1. 股票資料庫 (精簡為 3 檔，方便您後續自行新增)
 # ==========================================
@@ -22,7 +20,6 @@ STOCK_DATABASE = [
     {"id": "2330", "name": "台積電"},
     {"id": "9958", "name": "世紀鋼"},
     {"id": "9945", "name": "潤泰新"}
-    # 您可以在此處依據 {"id": "代碼", "name": "名稱"}, 的格式手動複製新增股票
 ]
 stock_options = [f"{s['id']} {s['name']}" for s in STOCK_DATABASE]
 
@@ -110,7 +107,7 @@ df["signal"] = (
     df["cond_kd_cross"] & df["cond_k_high"] & df["cond_vol"]
 )
 
-# 記住最後一天的數據（用於右側條件看板檢視）
+# 記住最後一天的數據
 latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
@@ -127,11 +124,15 @@ with left_col:
     
     # 快速看盤時間區間切換按鈕
     time_options = ["10天", "20天", "30天", "60天", "120天", "240天", "全部"]
+    
+    # 🎯【已修正 1：刪除多餘的功能標題文字】
+    # 將 label 設為空字串 ""，並啟用 label_visibility="collapsed"，徹底隱藏按鈕上方的原生文字區塊
     selected_period = st.radio(
-        "快速切換看盤區間：",
+        "",
         time_options,
         index=3,  # 預設 60天
-        horizontal=True
+        horizontal=True,
+        label_visibility="collapsed"
     )
     
     # 根據按鈕點選結果動態切換 plot_df
@@ -159,8 +160,6 @@ with left_col:
         line=dict(color="#38bdf8", width=2.5)
     ))
     
-    # 🎯【已修正：刪除 20MA 和 60MA 線段】不再往圖表添加這兩條均線的 Trace
-    
     # 策略進場點
     signal_days = plot_df[plot_df["signal"] == True]
     fig.add_trace(go.Scatter(
@@ -173,9 +172,14 @@ with left_col:
         paper_bgcolor='rgba(15,23,42,0.5)', 
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=20, b=20), height=480,
-        # 🎯【已修正：刪除上方重複原生圖例】將 showlegend 設為 False 即可徹底隱藏重複區塊
         showlegend=False,
-        xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
+        # 🎯【已修正 2：修改日期格式為 月/日】
+        # 使用 tickformat="%m/%d" 將 X 軸底部的日期強制轉換為「05/20」格式，更加精簡好讀
+        xaxis=dict(
+            showgrid=True, 
+            gridcolor='rgba(255,255,255,0.05)',
+            tickformat="%m/%d"
+        ),
         yaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)', 
