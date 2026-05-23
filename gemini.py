@@ -153,37 +153,38 @@ with left_col:
     # 建立 Plotly 圖表
     fig = go.Figure()
     
-    # 【修正點 1】移除 fill='tozeroy'，避免 Y 軸被強制拉到 0。改成純折線圖，讓畫面隨股價精密放大縮小
+    # 收盤價折線圖
     fig.add_trace(go.Scatter(
         x=plot_df["date"], y=plot_df["Close"], name="收盤價",
         line=dict(color="#38bdf8", width=2.5)
     ))
-    fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
-    fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
     
+    # 🎯【已修正：刪除 20MA 和 60MA 線段】不再往圖表添加這兩條均線的 Trace
+    
+    # 策略進場點
     signal_days = plot_df[plot_df["signal"] == True]
     fig.add_trace(go.Scatter(
         x=signal_days["date"], y=signal_days["Close"], name="策略進場點",
         mode='markers', marker=dict(color='#10b981', size=10, symbol='triangle-up', line=dict(width=1, color='white'))
     ))
     
-    # 【修正點 2】設定 yaxis 的 autorange=True。
-    # 當你切換 10天 或 60天 時，Y 軸會自動切換成「該區間的最低價 ~ 最高價」，波動會變得非常明顯且敏銳！
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor='rgba(15,23,42,0.5)', 
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=20, b=20), height=480,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        # 🎯【已修正：刪除上方重複原生圖例】將 showlegend 設為 False 即可徹底隱藏重複區塊
+        showlegend=False,
         xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
         yaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)', 
             side="right",
-            autorange=True  # 確保自動動態縮放
+            autorange=True  
         )
     )
-    st.plotly_chart(fig, use_container_width=True)
+    
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 with right_col:
     st.markdown("### 🎯 決策狀態")
