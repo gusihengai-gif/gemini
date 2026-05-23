@@ -32,11 +32,11 @@ selected_stock_str = st.sidebar.selectbox("選擇或輸入股票", stock_options
 STOCK_ID = selected_stock_str.split(" ")[0]
 
 # ==========================================
-# 2. 資料抓取與對齊
+# 2. 資料抓取與對齊 (為了支援 240天K線與均線計算，抓取天數擴大至 600 天)
 # ==========================================
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 end_date = datetime.date.today().strftime("%Y-%m-%d")
-start_date = (datetime.date.today() - datetime.timedelta(days=450)).strftime("%Y-%m-%d")
+start_date = (datetime.date.today() - datetime.timedelta(days=600)).strftime("%Y-%m-%d")
 
 @st.cache_data(ttl=3600)
 def fetch_stock_data(stock_id):
@@ -110,11 +110,12 @@ df["signal"] = (
     df["cond_kd_cross"] & df["cond_k_high"] & df["cond_vol"]
 )
 
+# 記住最後一天的數據（用於右側條件看板檢視，不受上方時間切換鈕影響）
 latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
 # ==========================================
-# 5. UI 畫面渲染 (改用 Streamlit 頂級標準排版)
+# 5. UI 畫面渲染
 # ==========================================
 st.title(f"📈 {selected_stock_str}")
 st.text(f"數據分析更新時間：{latest_date}")
@@ -124,17 +125,43 @@ left_col, right_col = st.columns([2, 1], gap="large")
 with left_col:
     st.markdown("### 📊 互動式趨勢分析圖表")
     
-    # 這裡的 Plotly 圖表自帶精美的深色暗調主題，與 React Dark Style 極致契合
+    # 🎯【新增功能】快速看盤時間區間切換按鈕
+    # 使用 Streamlit 官方最穩定的 radio 元件，並將其設定為水平排列 (horizontal)
+    time_options = ["10天", "20天", "30天", "60天", "120天", "240天", "全部"]
+    selected_period = st.radio(
+        "快速切換看盤區間：",
+        time_options,
+        index=3,  # 預設停在 60天
+        horizontal=True
+    )
+    
+    # 根據按鈕點選結果，動態裁切要畫在圖表上的 Dataframe 區間
+    if selected_period == "10天":
+        plot_df = df.tail(10)
+    elif selected_period == "20天":
+        plot_df = df.tail(20)
+    elif selected_period == "30天":
+        plot_df = df.tail(30)
+    elif selected_period == "60天":
+        plot_df = df.tail(60)
+    elif selected_period == "120天":
+        plot_df = df.tail(120)
+    elif selected_period == "240天":
+        plot_df = df.tail(240)
+    else:
+        plot_df = df
+        
+    # 建立 Plotly 圖表，傳入經切換鈕裁切過後的 plot_df
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["date"], y=df["Close"], name="收盤價",
+        x=plot_df["date"], y=plot_df["Close"], name="收盤價",
         line=dict(color="#38bdf8", width=2.5),
         fill='tozeroy', fillcolor='rgba(56, 189, 248, 0.03)'
     ))
-    fig.add_trace(go.Scatter(x=df["date"], y=df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
-    fig.add_trace(go.Scatter(x=df["date"], y=df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
+    fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
+    fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
     
-    signal_days = df[df["signal"] == True]
+    signal_days = plot_df[plot_df["signal"] == True]
     fig.add_trace(go.Scatter(
         x=signal_days["date"], y=signal_days["Close"], name="策略進場點",
         mode='markers', marker=dict(color='#10b981', size=10, symbol='triangle-up', line=dict(width=1, color='white'))
@@ -161,7 +188,6 @@ with right_col:
     st.write("")
     st.markdown("### 📋 策略細節即時檢視")
     
-    # 用最穩定的原生成件做排版，100% 避開任何 HTML 解析錯誤 Bug
     def show_condition(label, val_text, is_ok):
         col_lbl, col_val, col_tag = st.columns([2, 2, 1])
         with col_lbl:
