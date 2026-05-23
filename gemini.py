@@ -14,7 +14,7 @@ STOCK_ID = st.sidebar.text_input("輸入台灣股票代號", value="2330").strip
 
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# 【防錯機制】考慮到跨日清晨與時區問題，結束日期設為今天，抓取過去 400 天確保有足夠的交易日計算 60MA
+# 抓取過去 400 天確保有足夠的交易日計算 60MA
 end_date = datetime.date.today().strftime("%Y-%m-%d")
 start_date = (datetime.date.today() - datetime.timedelta(days=400)).strftime("%Y-%m-%d")
 
@@ -29,28 +29,32 @@ try:
     response = requests.get(API_BASE, params=params, timeout=10)
     data = response.json()
 except Exception as e:
-    st.error(f"❌ 連線至 FinMind API 失敗（可能是網路超時或 API 伺服器異常），請稍後再重試。")
+    st.error(f"❌ 連線至 FinMind API 失敗，請稍後再重試。")
     st.stop()
 
-# 檢查 API 狀態與是否有資料回來
 if not data or data.get("msg") != "success" or not data.get("data"):
     st.error(f"❌ 找不到股票代碼 【{STOCK_ID}】 的歷史資料。")
-    st.info("💡 提示：若代碼正確，可能是因為您在一小時內重整網頁太頻繁，觸發了 FinMind 免費版 API 的流量限制，請稍等 10-15 分鐘再試。")
     st.stop()
 
 # 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
 
-# 建立自動辨識大小寫對照表
+# 【核心修正】精準對應 FinMind 官方的原始欄位名稱
 mapping = {}
 for col in df.columns:
     col_lower = col.lower()
-    if col_lower == "close": mapping[col] = "Close"
-    elif col_lower == "open": mapping[col] = "Open"
-    elif col_lower == "high": mapping[col] = "High"
-    elif col_lower == "low": mapping[col] = "Low"
-    elif col_lower in ["volume", "trading_volume"]: mapping[col] = "Volume"
-    elif col_lower == "date": mapping[col] = "date"
+    if col_lower == "close":
+        mapping[col] = "Close"
+    elif col_lower == "open":
+        mapping[col] = "Open"
+    elif col_lower in ["high", "max"]:     # FinMind 最高價通常叫 max
+        mapping[col] = "High"
+    elif col_lower in ["low", "min"]:      # FinMind 最低價通常叫 min
+        mapping[col] = "Low"
+    elif col_lower in ["volume", "trading_volume"]:
+        mapping[col] = "Volume"
+    elif col_lower == "date":
+        mapping[col] = "date"
 
 df = df.rename(columns=mapping)
 
@@ -60,6 +64,7 @@ missing_cols = [c for c in required_cols if c not in df.columns]
 
 if missing_cols:
     st.error(f"❌ 關鍵欄位缺失: {missing_cols}，無法計算。")
+    st.info(f"API 目前回傳的實際原始欄位為: {list(data['data'][0].keys()) if data['data'] else '無'}")
     st.stop()
 
 # 轉換資料型態與排序
@@ -69,7 +74,6 @@ for col in ["Close", "Open", "High", "Low", "Volume"]:
 
 df = df.sort_values("date").reset_index(drop=True)
 
-# 再次檢查有效交易日是否足夠計算 60MA
 if len(df) < 60:
     st.warning(f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（僅有 {len(df)} 天），無法運行策略。")
     st.stop()
@@ -85,7 +89,7 @@ df["v_ma5"] = df["Volume"].rolling(window=5).mean()
 df["rsv_high"] = df["High"].rolling(window=9).max()
 df["rsv_low"] = df["Low"].rolling(window=9).min()
 
-# 避免分母為 0 的安全保護 (+ 1e-8)
+# 避免分母為 0 的安全保護
 df["rsv"] = ((df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"] + 1e-8)) * 100
 
 k_list = []
@@ -106,15 +110,14 @@ for rsv in df["rsv"]:
 df["k"] = k_list
 df["d"] = d_list
 
-# 清除因移動平均產生的 NaN
 df = df.dropna().reset_index(drop=True)
 
 if df.empty:
-    st.error("❌ 整理指標數據後無有效資料，請確認該股票是否近期暫停交易。")
+    st.error("❌ 整理指標數據後無有效資料。")
     st.stop()
 
 # ==========================================
-# 3. 策略條件判斷 (保留原买入讯号逻辑)
+# 3. 策略條件判斷
 # ==========================================
 df["cond_ma20"] = df["Close"] > df["ma20"]
 df["cond_ma60"] = df["Close"] > df["ma60"]
@@ -125,7 +128,7 @@ df["cond_vol"] = df["Volume"] > df["v_ma5"]
 
 df["signal"] = (
     df["cond_ma20"] & df["cond_ma60"] & df["cond_ma_trend"] & 
-    df["cond_kd_cross"] & df["cond_k_high"] & df["cond_vol"]
+    df["cond_kd_cross"] & df["cond_k_high"] & df["vol"] if "vol" in df.columns else df["cond_vol"]
 )
 
 # ==========================================
@@ -157,4 +160,4 @@ st.markdown("---")
 if latest["signal"]:
     st.success("## 最終決策狀態：【 符合策略進場 】")
 else:
-    st.warning("## 最終決策狀態：【 觀望等待訊號 】")
+    st.warning("## 最終決策状态：【 觀望等待訊號 】")
