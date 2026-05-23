@@ -1,15 +1,14 @@
 import datetime
 import pandas as pd
-import pandas_ta as ta
 import requests
+import streamlit as st  # 如果你要寫成 Streamlit 網頁，記得導入
 
 # ==========================================
 # 1. 設定參數與資料抓取
 # ==========================================
-STOCK_ID = "2330"  # 可自行更換股票代號，例如台積電 2330
+STOCK_ID = "2330"  # 可自行更換股票代號
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# 計算需要足夠的歷史資料（計算 60MA 與 KD 至少需要數個月的資料，這裡抓取近一年）
 end_date = datetime.date.today().strftime("%Y-%m-%d")
 start_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime(
     "%Y-%m-%d"
@@ -22,15 +21,16 @@ params = {
     "end_date": end_date,
 }
 
-print(f"正在抓取 {STOCK_ID} 的歷史股價資料...")
 response = requests.get(API_BASE, params=params)
 data = response.json()
 
 if data["msg"] != "success" or not data["data"]:
-    print("資料抓取失敗，請檢查網路或股票代碼。")
-    exit()
+    st.error("資料抓取失敗，請檢查網路或股票代碼。")
+    import sys
 
-# 轉換為 DataFrame 並整理格式
+    sys.exit()
+
+# 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
 df["date"] = pd.to_datetime(df["date"])
 df = df.rename(
@@ -42,44 +42,60 @@ df = df.rename(
         "volume": "Volume",
     }
 )
-# 確保數值型態正確
 for col in ["Close", "Open", "High", "Low", "Volume"]:
     df[col] = pd.to_numeric(df[col])
 
-# 依日期排序
 df = df.sort_values("date").reset_index(drop=True)
 
 # ==========================================
-# 2. 計算技術指標（依照原 JavaScript 邏輯）
+# 2. 純外掛/原生計算技術指標（不依賴 pandas-ta）
 # ==========================================
-# A. 均線計算 (20 MA, 60 MA, 5 日均量)
-df["ma20"] = ta.sma(df["Close"], length=20)
-df["ma60"] = ta.sma(df["Close"], length=60)
-df["v_ma5"] = ta.sma(df["Volume"], length=5)
+# A. 計算均線與均量
+df["ma20"] = df["Close"].rolling(window=20).mean()
+df["ma60"] = df["Close"].rolling(window=60).mean()
+df["v_ma5"] = df["Volume"].rolling(window=5).mean()
 
-# B. KD 指標計算 (參數 9, 3, 3)
-# pandas_ta 的 rsi/stoch 預設可能因平滑方式與台灣習慣稍有不同
-# 這裡使用符合台灣股市標準的 KD 計算方式（K=3, D=3 平滑）
-kd = ta.stoch(df["High"], df["Low"], df["Close"], k=9, d=3, smooth_k=3)
-# 根據 pandas_ta 的欄位名稱命名為 k 與 d
-df["k"] = kd["STOCHk_9_3_3"]
-df["d"] = kd["STOCHd_9_3_3"]
+# B. 計算 KD 指標 (9, 3, 3) —— 採用台灣標準 RSV 平滑法
+# 找出過去 9 天的最高價與最低價
+df["rsv_high"] = df["High"].rolling(window=9).max()
+df["rsv_low"] = df["Low"].rolling(window=9).min()
 
-# 移除因計算指標產生的空值(NaN)行
+# 計算 RSV 值
+df["rsv"] = (
+    (df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"])
+) * 100
+df["rsv"] = df["rsv"].fillna(50)  # 處理除以 0 的狀況
+
+# 迭代計算 K 值與 D 值 (初始值設為 50)
+k_list = []
+d_list = []
+current_k = 50.0
+current_d = 50.0
+
+for rsv in df["rsv"]:
+    # 台灣標準 KD：本日K = 2/3 * 昨日K + 1/3 * 本日RSV
+    current_k = (2 / 3) * current_k + (1 / 3) * rsv
+    # 台灣標準 KD：本日D = 2/3 * 昨日D + 1/3 * 本日K
+    current_d = (2 / 3) * current_d + (1 / 3) * current_k
+    k_list.append(current_k)
+    d_list.append(current_d)
+
+df["k"] = k_list
+df["d"] = d_list
+
+# 移除空值
 df = df.dropna().reset_index(drop=True)
 
 # ==========================================
 # 3. 策略條件判斷 (保留原買入訊號邏輯)
 # ==========================================
-# 逐行判斷是否符合條件
-df["cond_ma20"] = df["Close"] > df["ma20"]  # 價格在 20 MA 之上
-df["cond_ma60"] = df["Close"] > df["ma60"]  # 價格在 60 MA 之上
-df["cond_ma_trend"] = df["ma20"] > df["ma60"]  # 多頭排列 ma20 > ma60
-df["cond_kd_cross"] = df["k"] > df["d"]  # K 值大於 D 值
-df["cond_k_high"] = df["k"] > 50  # K 值大於 50
-df["cond_vol"] = df["Volume"] > df["v_ma5"]  # 當日成交量大於 5日均量
+df["cond_ma20"] = df["Close"] > df["ma20"]
+df["cond_ma60"] = df["Close"] > df["ma60"]
+df["cond_ma_trend"] = df["ma20"] > df["ma60"]
+df["cond_kd_cross"] = df["k"] > df["d"]
+df["cond_k_high"] = df["k"] > 50
+df["cond_vol"] = df["Volume"] > df["v_ma5"]
 
-# 必須全部條件皆為 True 才是買進訊號
 df["signal"] = (
     df["cond_ma20"]
     & df["cond_ma60"]
@@ -90,30 +106,35 @@ df["signal"] = (
 )
 
 # ==========================================
-# 4. 輸出最新一筆的結果
+# 4. Streamlit 網頁畫面輸出
 # ==========================================
 latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
-print("\n" + "=" * 40)
-print(f"【策略篩選結果】 股票代號: {STOCK_ID}  日期: {latest_date}")
-print("=" * 40)
-print(f"當日收盤價: {latest['Close']} | 成交量: {int(latest['Volume'])}")
-print(f"20 MA: {latest['ma20']:.2f} | 60 MA: {latest['ma60']:.2f}")
-print(f"K 值: {latest['k']:.2f} | D 值: {latest['d']:.2f}")
-print("-" * 40)
-print("【各項條件檢視】")
-print(f"1. 股價 > 20MA:        {'PASS' if latest['cond_ma20'] else 'WAIT'}")
-print(f"2. 股價 > 60MA:        {'PASS' if latest['cond_ma60'] else 'WAIT'}")
-print(f"3. 均線多頭(20>60):     {'PASS' if latest['cond_ma_trend'] else 'WAIT'}")
-print(f"4. KD金叉維持(K>D):    {'PASS' if latest['cond_kd_cross'] else 'WAIT'}")
-print(f"5. K值大於50(多方):     {'PASS' if latest['cond_k_high'] else 'WAIT'}")
-print(f"6. 量增(成交量>5日均量): {'PASS' if latest['cond_vol'] else 'WAIT'}")
-print("-" * 40)
+st.title(f"股票策略分析面板 - {STOCK_ID}")
+st.write(f"**分析日期：** {latest_date}")
 
-# 最終綜合訊號判斷
+col1, col2, col3 = st.columns(3)
+col1.metric("當日收盤價", f"{latest['Close']}")
+col2.metric("20 MA", f"{latest['ma20']:.2f}")
+col3.metric("K / D 值", f"{latest['k']:.1f} / {latest['d']:.1f}")
+
+st.markdown("### 【各項條件檢視】")
+
+
+def get_status_tag(cond):
+    return "🟩 **PASS**" if cond else "🟥 **WAIT**"
+
+
+st.write(f"{get_status_tag(latest['cond_ma20'])} 1. 股價 > 20MA")
+st.write(f"{get_status_tag(latest['cond_ma60'])} 2. 股價 > 60MA")
+st.write(f"{get_status_tag(latest['cond_ma_trend'])} 3. 均線多頭排列 (20MA > 60MA)")
+st.write(f"{get_status_tag(latest['cond_kd_cross'])} 4. KD金叉維持 (K > D)")
+st.write(f"{get_status_tag(latest['cond_k_high'])} 5. K值大於50 (多方掌控)")
+st.write(f"{get_status_tag(latest['cond_vol'])} 6. 量增 (成交量 > 5日均量)")
+
+st.markdown("---")
 if latest["signal"]:
-    print("▶ 最終決策狀態: 【 符合策略進場 】")
+    st.success("## 最終決策狀態：【 符合策略進場 】")
 else:
-    print("▶ 最終決策狀態: 【 觀望等待訊號 】")
-print("=" * 40)
+    st.warning("## 最終決策狀態：【 觀望等待訊號 】")
