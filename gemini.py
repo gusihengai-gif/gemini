@@ -171,19 +171,23 @@ with left_col:
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=20, b=20), height=480,
         showlegend=False,
-        # 🎯【核心修正：刪除灰色懸停條】
-        # 將 hovermode 設為 False，滑鼠移過去就不會再跳出任何灰色提示方塊與格線
         hovermode=False,
         xaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)',
-            tickformat="%m/%d"
+            tickformat="%m/%d",
+            showline=False,
+            mirror=False,
+            # 🎯【已修正】此處已永久關閉灰色時間滑塊
+            rangeslider=dict(visible=False)
         ),
         yaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)', 
             side="right",
-            autorange=True  
+            autorange=True,
+            showline=False,
+            mirror=False
         )
     )
     
