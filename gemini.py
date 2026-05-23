@@ -32,7 +32,7 @@ selected_stock_str = st.sidebar.selectbox("選擇或輸入股票", stock_options
 STOCK_ID = selected_stock_str.split(" ")[0]
 
 # ==========================================
-# 2. 資料抓取與對齊 (為了支援 240天K線與均線計算，抓取天數擴大至 600 天)
+# 2. 資料抓取與對齊 (抓取 600 天確保 240天均線有足夠數據計算)
 # ==========================================
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 end_date = datetime.date.today().strftime("%Y-%m-%d")
@@ -110,7 +110,7 @@ df["signal"] = (
     df["cond_kd_cross"] & df["cond_k_high"] & df["cond_vol"]
 )
 
-# 記住最後一天的數據（用於右側條件看板檢視，不受上方時間切換鈕影響）
+# 記住最後一天的數據（用於右側條件看板檢視）
 latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
@@ -125,17 +125,16 @@ left_col, right_col = st.columns([2, 1], gap="large")
 with left_col:
     st.markdown("### 📊 互動式趨勢分析圖表")
     
-    # 🎯【新增功能】快速看盤時間區間切換按鈕
-    # 使用 Streamlit 官方最穩定的 radio 元件，並將其設定為水平排列 (horizontal)
+    # 快速看盤時間區間切換按鈕
     time_options = ["10天", "20天", "30天", "60天", "120天", "240天", "全部"]
     selected_period = st.radio(
         "快速切換看盤區間：",
         time_options,
-        index=3,  # 預設停在 60天
+        index=3,  # 預設 60天
         horizontal=True
     )
     
-    # 根據按鈕點選結果，動態裁切要畫在圖表上的 Dataframe 區間
+    # 根據按鈕點選結果動態切換 plot_df
     if selected_period == "10天":
         plot_df = df.tail(10)
     elif selected_period == "20天":
@@ -151,12 +150,13 @@ with left_col:
     else:
         plot_df = df
         
-    # 建立 Plotly 圖表，傳入經切換鈕裁切過後的 plot_df
+    # 建立 Plotly 圖表
     fig = go.Figure()
+    
+    # 【修正點 1】移除 fill='tozeroy'，避免 Y 軸被強制拉到 0。改成純折線圖，讓畫面隨股價精密放大縮小
     fig.add_trace(go.Scatter(
         x=plot_df["date"], y=plot_df["Close"], name="收盤價",
-        line=dict(color="#38bdf8", width=2.5),
-        fill='tozeroy', fillcolor='rgba(56, 189, 248, 0.03)'
+        line=dict(color="#38bdf8", width=2.5)
     ))
     fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
     fig.add_trace(go.Scatter(x=plot_df["date"], y=plot_df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
@@ -167,6 +167,8 @@ with left_col:
         mode='markers', marker=dict(color='#10b981', size=10, symbol='triangle-up', line=dict(width=1, color='white'))
     ))
     
+    # 【修正點 2】設定 yaxis 的 autorange=True。
+    # 當你切換 10天 或 60天 時，Y 軸會自動切換成「該區間的最低價 ~ 最高價」，波動會變得非常明顯且敏銳！
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor='rgba(15,23,42,0.5)', 
@@ -174,7 +176,12 @@ with left_col:
         margin=dict(l=20, r=20, t=20, b=20), height=480,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', side="right")
+        yaxis=dict(
+            showgrid=True, 
+            gridcolor='rgba(255,255,255,0.05)', 
+            side="right",
+            autorange=True  # 確保自動動態縮放
+        )
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -200,7 +207,7 @@ with right_col:
             else:
                 st.text("WAIT")
 
-    # 渲染出美觀乾淨的條件看板
+    # 渲染出條件看板
     show_condition("股價高於 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20'])
     show_condition("股價高於 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60'])
     show_condition("均線多頭排列", "20MA > 60MA", latest['cond_ma_trend'])
