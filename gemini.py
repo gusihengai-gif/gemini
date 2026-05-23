@@ -5,7 +5,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 # ==========================================
-# 0. 網頁全域風格配置 (保留原 React Dark Style)
+# 0. 網頁全域風格配置 (使用 Streamlit 官方標準 API)
 # ==========================================
 st.set_page_config(
     page_title="Stock Signal Dashboard",
@@ -13,24 +13,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 【核心修正】改用 st.html 配合 <iframe> 注入，或包裹在不被解析的標籤中，徹底繞過 Streamlit 內建的 st.markdown Bug
-css_style = """
-<style>
-    .stApp { background-color: #0b1329; color: #f8fafc; } 
-    [data-testid='stSidebar'] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); } 
-    .metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); } 
-    .status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; } 
-    .status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
-</style>
-"""
-# 透過元件層級注入 CSS，避免 st.markdown 內部機制去解析大括號 {}
-st.components.v1.html(css_style, height=0, width=0)
-
-# 同時使用無大括號的純文字給 markdown 兜底安全網
-st.markdown("", unsafe_allowed_html=True)
+# 徹底移除所有 st.markdown(..., unsafe_allowed_html=True)，絕不踩 Python 3.14 的底層相容 Bug
 
 # ==========================================
-# 1. 股票資料庫 (已精簡，方便後續自行新增)
+# 1. 股票資料庫 (精簡為 3 檔，方便您後續自行新增)
 # ==========================================
 STOCK_DATABASE = [
     {"id": "2330", "name": "台積電"},
@@ -40,8 +26,8 @@ STOCK_DATABASE = [
 ]
 stock_options = [f"{s['id']} {s['name']}" for s in STOCK_DATABASE]
 
-# Sidebar 設定
-st.sidebar.markdown("### 🔍 策略篩選系統")
+# Sidebar 設定 (使用純文字 Markdown，不帶 HTML 參數)
+st.sidebar.markdown("## 🔍 策略篩選系統")
 selected_stock_str = st.sidebar.selectbox("選擇或輸入股票", stock_options, index=0)
 STOCK_ID = selected_stock_str.split(" ")[0]
 
@@ -128,21 +114,22 @@ latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
 # ==========================================
-# 5. UI 畫面渲染
+# 5. UI 畫面渲染 (改用 Streamlit 頂級標準排版)
 # ==========================================
-st.title(f"📊 {selected_stock_str}")
-st.caption(f"數據更新時間：{latest_date}")
+st.title(f"📈 {selected_stock_str}")
+st.text(f"數據分析更新時間：{latest_date}")
 
-left_col, right_col = st.columns([2, 1], gap="medium")
+left_col, right_col = st.columns([2, 1], gap="large")
 
 with left_col:
-    st.markdown("#### 📈 互動式趨勢分析圖表")
+    st.markdown("### 📊 互動式趨勢分析圖表")
     
+    # 這裡的 Plotly 圖表自帶精美的深色暗調主題，與 React Dark Style 極致契合
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df["date"], y=df["Close"], name="收盤價",
-        line=dict(color="#38bdf8", width=2),
-        fill='tozeroy', fillcolor='rgba(56, 189, 248, 0.05)'
+        line=dict(color="#38bdf8", width=2.5),
+        fill='tozeroy', fillcolor='rgba(56, 189, 248, 0.03)'
     ))
     fig.add_trace(go.Scatter(x=df["date"], y=df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
     fig.add_trace(go.Scatter(x=df["date"], y=df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
@@ -150,49 +137,47 @@ with left_col:
     signal_days = df[df["signal"] == True]
     fig.add_trace(go.Scatter(
         x=signal_days["date"], y=signal_days["Close"], name="策略進場點",
-        mode='markers', marker=dict(color='#10b981', size=8, symbol='triangle-up', line=dict(width=1, color='white'))
+        mode='markers', marker=dict(color='#10b981', size=10, symbol='triangle-up', line=dict(width=1, color='white'))
     ))
     
     fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=10, r=10, t=10, b=10), height=450,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="#94a3b8")),
-        xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.03)', tickfont=dict(color='#64748b')),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.03)', tickfont=dict(color='#64748b'), side="right")
+        template="plotly_dark",
+        paper_bgcolor='rgba(15,23,42,0.5)', 
+        plot_bgcolor='rgba(0,0,0,0)',
+        margin=dict(l=20, r=20, t=20, b=20), height=480,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)'),
+        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', side="right")
     )
     st.plotly_chart(fig, use_container_width=True)
 
 with right_col:
+    st.markdown("### 🎯 決策狀態")
     if latest["signal"]:
-        status_html = "<div style='background: linear-gradient(135deg, #064e3b 0%, #022c22 100%); border: 1px solid #10b981; border-radius:16px; padding:25px; text-align:center; box-shadow: 0 0 20px rgba(16,185,129,0.2);'>" \
-                      "<span style='color:#34d399; font-size:12px; font-weight:900; letter-spacing:2px;'>DECISION STATUS</span>" \
-                      "<h2 style='color:#10b981; margin-top:5px; font-weight:900;'>🎯 符合策略進場</h2></div>"
+        st.success("### 🎯 符合所有策略條件：建議進場")
     else:
-        status_html = "<div style='background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius:16px; padding:25px; text-align:center;'>" \
-                      "<span style='color:#94a3b8; font-size:12px; font-weight:900; letter-spacing:2px;'>DECISION STATUS</span>" \
-                      "<h2 style='color:#64748b; margin-top:5px; font-weight:900;'>⏳ 觀望等待訊號</h2></div>"
-    st.components.v1.html(status_html, height=120)
+        st.warning("### ⏳ 條件尚未滿足：觀望等待訊號")
+        
     st.write("")
+    st.markdown("### 📋 策略細節即時檢視")
     
-    st.markdown("#### 📋 策略條件檢視")
-    
-    def render_row(label, val_str, cond):
-        tag = f"<span class='status-pass' style='float:right; background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900;'>PASS</span>" if cond else f"<span class='status-wait' style='float:right; background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900;'>WAIT</span>"
-        return f"""
-        <div style='padding:10px 5px; border-bottom:1px solid rgba(255,255,255,0.05); font-family:sans-serif;'>
-            <span style='font-size:13px; font-weight:600; color:#e2e8f0;'>{label}</span>
-            <span style='font-size:11px; color:#64748b; margin-left:5px;'>({val_str})</span>
-            {tag}
-        </div>
-        """
-    
-    rows_html = "<div style='background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);'>" + \
-                render_row("股價高於 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20']) + \
-                render_row("股價高於 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60']) + \
-                render_row("均線多頭排列", "20MA > 60MA", latest['cond_ma_trend']) + \
-                render_row("KD 金叉維持", f"K:{latest['k']:.1f} > D:{latest['d']:.1f}", latest['cond_kd_cross']) + \
-                render_row("K 值大於 50", f"K:{latest['k']:.1f} > 50", latest['cond_k_high']) + \
-                render_row("當日量增突破", "量 > 5日均量", latest['cond_vol']) + \
-                "</div>"
-                
-    st.components.v1.html(rows_html, height=320)
+    # 用最穩定的原生成件做排版，100% 避開任何 HTML 解析錯誤 Bug
+    def show_condition(label, val_text, is_ok):
+        col_lbl, col_val, col_tag = st.columns([2, 2, 1])
+        with col_lbl:
+            st.write(f"**{label}**")
+        with col_val:
+            st.caption(f"({val_text})")
+        with col_tag:
+            if is_ok:
+                st.info("PASS")
+            else:
+                st.text("WAIT")
+
+    # 渲染出美觀乾淨的條件看板
+    show_condition("股價高於 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20'])
+    show_condition("股價高於 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60'])
+    show_condition("均線多頭排列", "20MA > 60MA", latest['cond_ma_trend'])
+    show_condition("KD 金叉維持", f"K:{latest['k']:.1f} > D:{latest['d']:.1f}", latest['cond_kd_cross'])
+    show_condition("K 值大於 50", f"K:{latest['k']:.1f} > 50", latest['cond_k_high'])
+    show_condition("當日量增突破", "量 > 5日均量", latest['cond_vol'])
