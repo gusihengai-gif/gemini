@@ -13,7 +13,7 @@ STOCK_ID = st.sidebar.text_input("輸入台灣股票代號", value="2330").strip
 
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# 計算需要足夠的歷史資料，抓取近 365 天
+# 抓取過去 365 天的歷史資料
 end_date = datetime.date.today().strftime("%Y-%m-%d")
 start_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime(
     "%Y-%m-%d"
@@ -26,16 +26,27 @@ params = {
     "end_date": end_date,
 }
 
-response = requests.get(API_BASE, params=params)
-data = response.json()
+try:
+    response = requests.get(API_BASE, params=params)
+    data = response.json()
+except Exception as e:
+    st.error(f"連線至 FinMind API 失敗，請稍後再試。錯誤訊息: {e}")
+    st.stop()
 
-if data["msg"] != "success" or not data["data"]:
-    st.error(f"資料抓取失敗，請檢查網路或股票代碼 【{STOCK_ID}】 是否正確。")
-    st.stop()  # 替代原有的 sys.exit()，讓 Streamlit 優雅停止而不崩潰
+if data.get("msg") != "success" or not data.get("data"):
+    st.error(
+        f"找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確（例如台積電為 2330）。"
+    )
+    st.stop()
 
 # 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
 df["date"] = pd.to_datetime(df["date"])
+
+# 【安全機制】統一將所有欄位名稱轉為小寫，避免大小寫不一致導致改名失敗
+df.columns = [col.lower() for col in df.columns]
+
+# 強制重新命名為標準大寫
 df = df.rename(
     columns={
         "close": "Close",
@@ -45,15 +56,27 @@ df = df.rename(
         "volume": "Volume",
     }
 )
+
+# 確保轉為數值型態
 for col in ["Close", "Open", "High", "Low", "Volume"]:
-    df[col] = pd.to_numeric(df[col])
+    if col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    else:
+        st.error(f"資料庫中缺少關鍵欄位: {col}，無法進行計算。")
+        st.stop()
 
 df = df.sort_values("date").reset_index(drop=True)
 
+# 檢查防線 1：確認轉換後是否有基礎資料
+if df.empty or len(df) < 60:
+    st.warning(
+        f"股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 策略指標。"
+    )
+    st.stop()
+
 # ==========================================
-# 2. 原生技術指標計算（修正 KD 邏輯失真問題）
+# 2. 原生技術指標計算
 # ==========================================
-# A. 計算均線與均量
 df["ma20"] = df["Close"].rolling(window=20).mean()
 df["ma60"] = df["Close"].rolling(window=60).mean()
 df["v_ma5"] = df["Volume"].rolling(window=5).mean()
@@ -67,7 +90,6 @@ df["rsv"] = (
     (df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"])
 ) * 100
 
-# 【修正點】精準計算 KD 迴圈
 k_list = []
 d_list = []
 current_k = 50.0
@@ -75,11 +97,9 @@ current_d = 50.0
 
 for rsv in df["rsv"]:
     if pd.isna(rsv):
-        # 在前 8 天 RSV 為空值時，KD 保持 50，且不讓失真資料影響後續權重
         k_list.append(None)
         d_list.append(None)
     else:
-        # 台灣標準 KD 平滑公式
         current_k = (2 / 3) * current_k + (1 / 3) * rsv
         current_d = (2 / 3) * current_d + (1 / 3) * current_k
         k_list.append(current_k)
@@ -88,8 +108,13 @@ for rsv in df["rsv"]:
 df["k"] = k_list
 df["d"] = d_list
 
-# 移除因計算指標（特別是 ma60 需要 60 天資料）產生的早期空值行
+# 移除因滾動計算產生的空值行
 df = df.dropna().reset_index(drop=True)
+
+# 檢查防線 2：確認移除空值後是否還有剩餘資料
+if df.empty:
+    st.error("指標計算後無有效數據，請確認該股票近期是否有正常交易。")
+    st.stop()
 
 # ==========================================
 # 3. 策略條件判斷
@@ -113,10 +138,6 @@ df["signal"] = (
 # ==========================================
 # 4. Streamlit 網頁畫面輸出
 # ==========================================
-if df.empty:
-    st.warning("歷史資料量不足以計算 60MA 與 KD 指標，請確認該股票是否有足夠交易日。")
-    st.stop()
-
 latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
