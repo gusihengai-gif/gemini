@@ -125,8 +125,6 @@ with left_col:
     # 快速看盤時間區間切換按鈕
     time_options = ["10天", "20天", "30天", "60天", "120天", "240天", "全部"]
     
-    # 🎯【已修正 1：刪除多餘的功能標題文字】
-    # 將 label 設為空字串 ""，並啟用 label_visibility="collapsed"，徹底隱藏按鈕上方的原生文字區塊
     selected_period = st.radio(
         "",
         time_options,
@@ -173,8 +171,9 @@ with left_col:
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=20, b=20), height=480,
         showlegend=False,
-        # 🎯【已修正 2：修改日期格式為 月/日】
-        # 使用 tickformat="%m/%d" 將 X 軸底部的日期強制轉換為「05/20」格式，更加精簡好讀
+        # 🎯【核心修正：刪除灰色懸停條】
+        # 將 hovermode 設為 False，滑鼠移過去就不會再跳出任何灰色提示方塊與格線
+        hovermode=False,
         xaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)',
