@@ -30,47 +30,63 @@ try:
     response = requests.get(API_BASE, params=params)
     data = response.json()
 except Exception as e:
-    st.error(f"連線至 FinMind API 失敗，請稍後再試。錯誤訊息: {e}")
+    st.error(f"❌ 連線至 FinMind API 失敗，請稍後再試。錯誤訊息: {e}")
     st.stop()
 
 if data.get("msg") != "success" or not data.get("data"):
     st.error(
-        f"找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確（例如台積電為 2330）。"
+        f"❌ 找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確，或該股票今天是否無交易。"
     )
     st.stop()
 
 # 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
+
+# 【除錯專用顯示】如果在部署時還有問題，這行會列出 API 給了什麼
+# st.write("原始欄位檢查：", list(df.columns))
+
+# 建立一個對照表，不管大小寫都對應到標準名稱
+mapping = {}
+for col in df.columns:
+    col_lower = col.lower()
+    if col_lower == "close":
+        mapping[col] = "Close"
+    elif col_lower == "open":
+        mapping[col] = "Open"
+    elif col_lower == "high":
+        mapping[col] = "High"
+    elif col_lower == "low":
+        mapping[col] = "Low"
+    elif col_lower in ["volume", "trading_volume"]:
+        mapping[col] = "Volume"
+    elif col_lower == "date":
+        mapping[col] = "date"
+
+# 重新命名欄位
+df = df.rename(columns=mapping)
+
+# 檢查必要的欄位是否都有成功對應
+required_cols = ["Close", "Open", "High", "Low", "Volume", "date"]
+missing_cols = [c for c in required_cols if c not in df.columns]
+
+if missing_cols:
+    st.error(
+        f"❌ API 回傳資料異常！缺少關鍵欄位: {missing_cols}。無法進行策略計算。"
+    )
+    st.info(f"API 目前回傳的實際欄位為: {list(df.columns)}")
+    st.stop()
+
+# 確保資料型態與排序
 df["date"] = pd.to_datetime(df["date"])
-
-# 【安全機制】統一將所有欄位名稱轉為小寫，避免大小寫不一致導致改名失敗
-df.columns = [col.lower() for col in df.columns]
-
-# 強制重新命名為標準大寫
-df = df.rename(
-    columns={
-        "close": "Close",
-        "open": "Open",
-        "high": "High",
-        "low": "Low",
-        "volume": "Volume",
-    }
-)
-
-# 確保轉為數值型態
 for col in ["Close", "Open", "High", "Low", "Volume"]:
-    if col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    else:
-        st.error(f"資料庫中缺少關鍵欄位: {col}，無法進行計算。")
-        st.stop()
+    df[col] = pd.to_numeric(df[col], errors="coerce")
 
 df = df.sort_values("date").reset_index(drop=True)
 
-# 檢查防線 1：確認轉換後是否有基礎資料
-if df.empty or len(df) < 60:
+# 檢查歷史資料長度是否足夠
+if len(df) < 60:
     st.warning(
-        f"股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 策略指標。"
+        f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 策略指標。"
     )
     st.stop()
 
@@ -81,13 +97,13 @@ df["ma20"] = df["Close"].rolling(window=20).mean()
 df["ma60"] = df["Close"].rolling(window=60).mean()
 df["v_ma5"] = df["Volume"].rolling(window=5).mean()
 
-# B. 計算 KD 指標 (9, 3, 3)
+# 計算 KD 指標 (9, 3, 3)
 df["rsv_high"] = df["High"].rolling(window=9).max()
 df["rsv_low"] = df["Low"].rolling(window=9).min()
 
-# 計算 RSV 值
+# 避免除以 0 的安全保護
 df["rsv"] = (
-    (df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"])
+    (df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"] + 1e-8)
 ) * 100
 
 k_list = []
@@ -108,12 +124,11 @@ for rsv in df["rsv"]:
 df["k"] = k_list
 df["d"] = d_list
 
-# 移除因滾動計算產生的空值行
+# 移除空值行
 df = df.dropna().reset_index(drop=True)
 
-# 檢查防線 2：確認移除空值後是否還有剩餘資料
 if df.empty:
-    st.error("指標計算後無有效數據，請確認該股票近期是否有正常交易。")
+    st.error("❌ 指標計算後無有效數據，請確認該股票近期交易狀況。")
     st.stop()
 
 # ==========================================
