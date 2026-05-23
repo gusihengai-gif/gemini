@@ -6,6 +6,7 @@ import streamlit as st
 # ==========================================
 # 1. Streamlit 介面設定與參數抓取
 # ==========================================
+st.set_page_config(page_title="股票策略分析面板", layout="centered")
 st.title("股票策略分析面板")
 
 # 在側邊欄提供股票代號輸入，預設 2330
@@ -13,9 +14,9 @@ STOCK_ID = st.sidebar.text_input("輸入台灣股票代號", value="2330").strip
 
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# 【修復點】將日期計算改為標準的乾淨一行，徹底避免語法與縮排誤判
+# 【防錯機制】考慮到跨日清晨與時區問題，結束日期設為今天，抓取過去 400 天確保有足夠的交易日計算 60MA
 end_date = datetime.date.today().strftime("%Y-%m-%d")
-start_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
+start_date = (datetime.date.today() - datetime.timedelta(days=400)).strftime("%Y-%m-%d")
 
 params = {
     "dataset": "TaiwanStockPrice",
@@ -25,62 +26,56 @@ params = {
 }
 
 try:
-    response = requests.get(API_BASE, params=params)
+    response = requests.get(API_BASE, params=params, timeout=10)
     data = response.json()
 except Exception as e:
-    st.error(f"❌ 連線至 FinMind API 失敗，請稍後再試。錯誤訊息: {e}")
+    st.error(f"❌ 連線至 FinMind API 失敗（可能是網路超時或 API 伺服器異常），請稍後再重試。")
     st.stop()
 
-if data.get("msg") != "success" or not data.get("data"):
-    st.error(f"❌ 找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確。")
+# 檢查 API 狀態與是否有資料回來
+if not data or data.get("msg") != "success" or not data.get("data"):
+    st.error(f"❌ 找不到股票代碼 【{STOCK_ID}】 的歷史資料。")
+    st.info("💡 提示：若代碼正確，可能是因為您在一小時內重整網頁太頻繁，觸發了 FinMind 免費版 API 的流量限制，請稍等 10-15 分鐘再試。")
     st.stop()
 
 # 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
 
-# 建立一個對照表，不管大小寫都對應到標準名稱
+# 建立自動辨識大小寫對照表
 mapping = {}
 for col in df.columns:
     col_lower = col.lower()
-    if col_lower == "close":
-        mapping[col] = "Close"
-    elif col_lower == "open":
-        mapping[col] = "Open"
-    elif col_lower == "high":
-        mapping[col] = "High"
-    elif col_lower == "low":
-        mapping[col] = "Low"
-    elif col_lower in ["volume", "trading_volume"]:
-        mapping[col] = "Volume"
-    elif col_lower == "date":
-        mapping[col] = "date"
+    if col_lower == "close": mapping[col] = "Close"
+    elif col_lower == "open": mapping[col] = "Open"
+    elif col_lower == "high": mapping[col] = "High"
+    elif col_lower == "low": mapping[col] = "Low"
+    elif col_lower in ["volume", "trading_volume"]: mapping[col] = "Volume"
+    elif col_lower == "date": mapping[col] = "date"
 
-# 重新命名欄位
 df = df.rename(columns=mapping)
 
-# 檢查必要的欄位是否都有成功對應
+# 確保所有必要欄位都存在
 required_cols = ["Close", "Open", "High", "Low", "Volume", "date"]
 missing_cols = [c for c in required_cols if c not in df.columns]
 
 if missing_cols:
-    st.error(f"❌ API 回傳資料異常！缺少關鍵欄位: {missing_cols}")
-    st.info(f"API 目前回傳的實際欄位為: {list(df.columns)}")
+    st.error(f"❌ 關鍵欄位缺失: {missing_cols}，無法計算。")
     st.stop()
 
-# 確保資料型態與排序
+# 轉換資料型態與排序
 df["date"] = pd.to_datetime(df["date"])
 for col in ["Close", "Open", "High", "Low", "Volume"]:
     df[col] = pd.to_numeric(df[col], errors="coerce")
 
 df = df.sort_values("date").reset_index(drop=True)
 
-# 檢查歷史資料長度是否足夠
+# 再次檢查有效交易日是否足夠計算 60MA
 if len(df) < 60:
-    st.warning(f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 指標。")
+    st.warning(f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（僅有 {len(df)} 天），無法運行策略。")
     st.stop()
 
 # ==========================================
-# 2. 原生技術指標計算
+# 2. 原生技術指標計算 (不依賴 pandas-ta)
 # ==========================================
 df["ma20"] = df["Close"].rolling(window=20).mean()
 df["ma60"] = df["Close"].rolling(window=60).mean()
@@ -90,7 +85,7 @@ df["v_ma5"] = df["Volume"].rolling(window=5).mean()
 df["rsv_high"] = df["High"].rolling(window=9).max()
 df["rsv_low"] = df["Low"].rolling(window=9).min()
 
-# 避免除以 0 的安全保護
+# 避免分母為 0 的安全保護 (+ 1e-8)
 df["rsv"] = ((df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"] + 1e-8)) * 100
 
 k_list = []
@@ -111,15 +106,15 @@ for rsv in df["rsv"]:
 df["k"] = k_list
 df["d"] = d_list
 
-# 移除空值行
+# 清除因移動平均產生的 NaN
 df = df.dropna().reset_index(drop=True)
 
 if df.empty:
-    st.error("❌ 指標計算後無有效數據。")
+    st.error("❌ 整理指標數據後無有效資料，請確認該股票是否近期暫停交易。")
     st.stop()
 
 # ==========================================
-# 3. 策略條件判斷
+# 3. 策略條件判斷 (保留原买入讯号逻辑)
 # ==========================================
 df["cond_ma20"] = df["Close"] > df["ma20"]
 df["cond_ma60"] = df["Close"] > df["ma60"]
@@ -129,12 +124,8 @@ df["cond_k_high"] = df["k"] > 50
 df["cond_vol"] = df["Volume"] > df["v_ma5"]
 
 df["signal"] = (
-    df["cond_ma20"]
-    & df["cond_ma60"]
-    & df["cond_ma_trend"]
-    & df["cond_kd_cross"]
-    & df["cond_k_high"]
-    & df["cond_vol"]
+    df["cond_ma20"] & df["cond_ma60"] & df["cond_ma_trend"] & 
+    df["cond_kd_cross"] & df["cond_k_high"] & df["cond_vol"]
 )
 
 # ==========================================
