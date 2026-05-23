@@ -13,9 +13,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 使用單行字串傳入 CSS，避免 Python 3.14 的多行字串大括號解析錯誤
-css_style = "<style>.stApp { background-color: #0b1329; color: #f8fafc; } [data-testid='stSidebar'] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); } .metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); } .status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; } .status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }</style>"
-st.markdown(css_style, unsafe_allowed_html=True)
+# 【核心修正】改用 st.html 配合 <iframe> 注入，或包裹在不被解析的標籤中，徹底繞過 Streamlit 內建的 st.markdown Bug
+css_style = """
+<style>
+    .stApp { background-color: #0b1329; color: #f8fafc; } 
+    [data-testid='stSidebar'] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); } 
+    .metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); } 
+    .status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; } 
+    .status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
+</style>
+"""
+# 透過元件層級注入 CSS，避免 st.markdown 內部機制去解析大括號 {}
+st.components.v1.html(css_style, height=0, width=0)
+
+# 同時使用無大括號的純文字給 markdown 兜底安全網
+st.markdown("", unsafe_allowed_html=True)
 
 # ==========================================
 # 1. 股票資料庫 (已精簡，方便後續自行新增)
@@ -29,7 +41,7 @@ STOCK_DATABASE = [
 stock_options = [f"{s['id']} {s['name']}" for s in STOCK_DATABASE]
 
 # Sidebar 設定
-st.sidebar.markdown("<h2 style='color:#38bdf8; font-weight:900; margin-bottom:20px;'>🔍 策略篩選系統</h2>", unsafe_allowed_html=True)
+st.sidebar.markdown("### 🔍 策略篩選系統")
 selected_stock_str = st.sidebar.selectbox("選擇或輸入股票", stock_options, index=0)
 STOCK_ID = selected_stock_str.split(" ")[0]
 
@@ -116,23 +128,15 @@ latest = df.iloc[-1]
 latest_date = latest["date"].strftime("%Y-%m-%d")
 
 # ==========================================
-# 5. UI 畫面渲染 (完全複刻原 React UI 質感)
+# 5. UI 畫面渲染
 # ==========================================
-st.markdown(f"""
-    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;'>
-        <div>
-            <h1 style='margin:0; font-weight:900; background: linear-gradient(to right, #38bdf8, #3b82f6); -webkit-background-clip: text; -webkit-text-fill-color: transparent;'>
-                {selected_stock_str}
-            </h1>
-            <p style='margin:0; color:#64748b; font-size:14px;'>分析數據更新時間：{latest_date}</p>
-        </div>
-    </div>
-""", unsafe_allowed_html=True)
+st.title(f"📊 {selected_stock_str}")
+st.caption(f"數據更新時間：{latest_date}")
 
 left_col, right_col = st.columns([2, 1], gap="medium")
 
 with left_col:
-    st.markdown("<h4 style='color:#94a3b8; font-weight:700;'>📈 互動式趨勢 analysis 圖表</h4>", unsafe_allowed_html=True)
+    st.markdown("#### 📈 互動式趨勢分析圖表")
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -167,25 +171,22 @@ with right_col:
         status_html = "<div style='background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; border-radius:16px; padding:25px; text-align:center;'>" \
                       "<span style='color:#94a3b8; font-size:12px; font-weight:900; letter-spacing:2px;'>DECISION STATUS</span>" \
                       "<h2 style='color:#64748b; margin-top:5px; font-weight:900;'>⏳ 觀望等待訊號</h2></div>"
-    st.markdown(status_html, unsafe_allowed_html=True)
+    st.components.v1.html(status_html, height=120)
     st.write("")
     
-    st.markdown("<h4 style='color:#94a3b8; font-weight:700; margin-bottom:15px;'>📋 策略條件檢視</h4>", unsafe_allowed_html=True)
+    st.markdown("#### 📋 策略條件檢視")
     
     def render_row(label, val_str, cond):
-        tag = f"<span class='status-pass'>PASS</span>" if cond else f"<span class='status-wait'>WAIT</span>"
+        tag = f"<span class='status-pass' style='float:right; background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900;'>PASS</span>" if cond else f"<span class='status-wait' style='float:right; background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900;'>WAIT</span>"
         return f"""
-        <div style='display:flex; justify-content:space-between; align-items:center; padding:12px 5px; border-bottom:1px solid rgba(255,255,255,0.03);'>
-            <div>
-                <span style='font-size:14px; font-weight:600; color:#e2e8f0;'>{label}</span>
-                <span style='font-size:12px; color:#64748b; margin-left:8px;'>({val_str})</span>
-            </div>
+        <div style='padding:10px 5px; border-bottom:1px solid rgba(255,255,255,0.05); font-family:sans-serif;'>
+            <span style='font-size:13px; font-weight:600; color:#e2e8f0;'>{label}</span>
+            <span style='font-size:11px; color:#64748b; margin-left:5px;'>({val_str})</span>
             {tag}
         </div>
         """
     
-    # 【徹底修復】將 rows_html 全數改為嚴格無縮排格式，100% 避免縮排報錯
-    rows_html = "<div class='metric-card' style='padding: 10px 20px;'>" + \
+    rows_html = "<div style='background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);'>" + \
                 render_row("股價高於 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20']) + \
                 render_row("股價高於 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60']) + \
                 render_row("均線多頭排列", "20MA > 60MA", latest['cond_ma_trend']) + \
@@ -194,4 +195,4 @@ with right_col:
                 render_row("當日量增突破", "量 > 5日均量", latest['cond_vol']) + \
                 "</div>"
                 
-    st.markdown(rows_html, unsafe_allowed_html=True)
+    st.components.v1.html(rows_html, height=320)
