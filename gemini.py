@@ -13,24 +13,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 【修復點】移除多行字串內的前置縮排，避免 Python 3.14 解析出錯
-st.markdown("""<style>
-.stApp { background-color: #0b1329; color: #f8fafc; }
-[data-testid="stSidebar"] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); }
-.metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); }
-.status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
-.status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
-</style>""", unsafe_allowed_html=True)
+# 【核心修正】將 CSS 內容轉為標準單行字串，100% 避開 Python 3.14 與 Streamlit 內部的解析 Bug
+css_style = "<style>.stApp { background-color: #0b1329; color: #f8fafc; } [data-testid='stSidebar'] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); } .metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); } .status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; } .status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }</style>"
+st.markdown(css_style, unsafe_allowed_html=True)
 
 # ==========================================
-# 1. 內建原程式的股票資料庫 (STOCK_DATABASE)
+# 1. 股票資料庫 (已精簡，方便後續自行新增)
 # ==========================================
 STOCK_DATABASE = [
-    {"id": "2330", "name": "台積電"}, {"id": "9962", "name": "有益"}, 
-    {"id": "9960", "name": "邁達康"}, {"id": "9958", "name": "世紀鋼"}, 
-    {"id": "9955", "name": "佳龍"}, {"id": "9951", "name": "皇田"}, 
-    {"id": "9950", "name": "萬國通"}, {"id": "9949", "name": "琉園"}, 
-    {"id": "9946", "name": "三發地產"}, {"id": "9945", "name": "潤泰新"}
+    {"id": "2330", "name": "台積電"},
+    {"id": "9958", "name": "世紀鋼"},
+    {"id": "9945", "name": "潤泰新"}
+    # 你可以在下方依照 {"id": "股票代碼", "name": "股票名稱"}, 的格式繼續新增
 ]
 stock_options = [f"{s['id']} {s['name']}" for s in STOCK_DATABASE]
 
@@ -46,7 +40,7 @@ API_BASE = "https://api.finmindtrade.com/api/v4/data"
 end_date = datetime.date.today().strftime("%Y-%m-%d")
 start_date = (datetime.date.today() - datetime.timedelta(days=450)).strftime("%Y-%m-%d")
 
-@st.cache_data(ttl=3600)  # 保留原快取機制
+@st.cache_data(ttl=3600)  # 保留快取機制
 def fetch_stock_data(stock_id):
     params = {"dataset": "TaiwanStockPrice", "data_id": stock_id, "start_date": start_date, "end_date": end_date}
     try:
@@ -192,10 +186,15 @@ with right_col:
     
     rows_html = f"""
     <div class='metric-card' style='padding: 10px 20px;'>
-        {render_row("股價高于 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20'])}
-        {render_row("股價高于 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60'])}
+        {render_row("股價高於 20MA", f"{latest['Close']:.1f} > {latest['ma20']:.1f}", latest['cond_ma20'])}
+        {render_row("股價高於 60MA", f"{latest['Close']:.1f} > {latest['ma60']:.1f}", latest['cond_ma60'])}
         {render_row("均線多頭排列", f"20MA > 60MA", latest['cond_ma_trend'])}
         {render_row("KD 金叉維持", f"K:{latest['k']:.1f} > D:{latest['d']:.1f}", latest['cond_kd_cross'])}
+        {render_row("K 值大於 50", f"K:{latest['k']:.1f} > 50", latest['cond_k_high'])}
+        {render_row("當日量增突破", f"量 > 5日均量", latest['cond_vol'])}
+    </div>
+    """
+    st.markdown(rows_html, unsafe_allowed_html=True)
         {render_row("K 值大於 50", f"K:{latest['k']:.1f} > 50", latest['cond_k_high'])}
         {render_row("當日量增突破", f"量 > 5日均量", latest['cond_vol'])}
     </div>
