@@ -13,42 +13,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 注入 CSS 重現原本 React 程式中的 Slate-900 / Zinc 科技黑風格
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: #0b1329;
-        color: #f8fafc;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #0f172a;
-        border-right: 1px solid rgba(255,255,255,0.05);
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border: 1px solid rgba(255,255,255,0.05);
-        border-radius: 16px;
-        padding: 20px;
-        box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-    }
-    .status-pass {
-        background-color: rgba(16, 185, 129, 0.15);
-        color: #10b981;
-        padding: 4px 10px;
-        border-radius: 9999px;
-        font-size: 12px;
-        font-weight: 900;
-    }
-    .status-wait {
-        background-color: rgba(30, 41, 59, 0.8);
-        color: #64748b;
-        padding: 4px 10px;
-        border-radius: 9999px;
-        font-size: 12px;
-        font-weight: 900;
-    }
-    </style>
-""", unsafe_allowed_html=True)
+# 【修復點】移除多行字串內的前置縮排，避免 Python 3.14 解析出錯
+st.markdown("""<style>
+.stApp { background-color: #0b1329; color: #f8fafc; }
+[data-testid="stSidebar"] { background-color: #0f172a; border-right: 1px solid rgba(255,255,255,0.05); }
+.metric-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); }
+.status-pass { background-color: rgba(16, 185, 129, 0.15); color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
+.status-wait { background-color: rgba(30, 41, 59, 0.8); color: #64748b; padding: 4px 10px; border-radius: 9999px; font-size: 12px; font-weight: 900; }
+</style>""", unsafe_allowed_html=True)
 
 # ==========================================
 # 1. 內建原程式的股票資料庫 (STOCK_DATABASE)
@@ -60,7 +32,6 @@ STOCK_DATABASE = [
     {"id": "9950", "name": "萬國通"}, {"id": "9949", "name": "琉園"}, 
     {"id": "9946", "name": "三發地產"}, {"id": "9945", "name": "潤泰新"}
 ]
-# 建立選單顯示文字
 stock_options = [f"{s['id']} {s['name']}" for s in STOCK_DATABASE]
 
 # Sidebar 設定
@@ -75,7 +46,7 @@ API_BASE = "https://api.finmindtrade.com/api/v4/data"
 end_date = datetime.date.today().strftime("%Y-%m-%d")
 start_date = (datetime.date.today() - datetime.timedelta(days=450)).strftime("%Y-%m-%d")
 
-@st.cache_data(ttl=3600)  # 保留原程式的 Cache 快取概念，一小時內不重複抓取
+@st.cache_data(ttl=3600)  # 保留原快取機制
 def fetch_stock_data(stock_id):
     params = {"dataset": "TaiwanStockPrice", "data_id": stock_id, "start_date": start_date, "end_date": end_date}
     try:
@@ -153,7 +124,6 @@ latest_date = latest["date"].strftime("%Y-%m-%d")
 # ==========================================
 # 5. UI 畫面渲染 (完全複刻原 React UI 質感)
 # ==========================================
-# 頂部狀態列
 st.markdown(f"""
     <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;'>
         <div>
@@ -165,34 +135,26 @@ st.markdown(f"""
     </div>
 """, unsafe_allowed_html=True)
 
-# 主畫面切分左右兩邊 (左邊圖表，右邊儀表板數據)
 left_col, right_col = st.columns([2, 1], gap="medium")
 
 with left_col:
     st.markdown("<h4 style='color:#94a3b8; font-weight:700;'>📈 互動式趨勢分析圖</h4>", unsafe_allowed_html=True)
     
-    # 使用 Plotly 繪製原本 Recharts 的科技感漸層圖表
     fig = go.Figure()
-    
-    # 填滿收盤價區域 (Area 效果)
     fig.add_trace(go.Scatter(
         x=df["date"], y=df["Close"], name="收盤價",
         line=dict(color="#38bdf8", width=2),
         fill='tozeroy', fillcolor='rgba(56, 189, 248, 0.05)'
     ))
-    
-    # 疊加 MA20 與 MA60 均線
     fig.add_trace(go.Scatter(x=df["date"], y=df["ma20"], name="20 MA", line=dict(color="#fbbf24", width=1.5, dash='dash')))
     fig.add_trace(go.Scatter(x=df["date"], y=df["ma60"], name="60 MA", line=dict(color="#ec4899", width=1.5)))
     
-    # 標示出所有符合策略進場的買入點 (Scatter 點標記)
     signal_days = df[df["signal"] == True]
     fig.add_trace(go.Scatter(
         x=signal_days["date"], y=signal_days["Close"], name="策略進場點",
         mode='markers', marker=dict(color='#10b981', size=8, symbol='triangle-up', line=dict(width=1, color='white'))
     ))
     
-    # 套用黑底樣式配置
     fig.update_layout(
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=10, r=10, t=10, b=10), height=450,
@@ -203,7 +165,6 @@ with left_col:
     st.plotly_chart(fig, use_container_width=True)
 
 with right_col:
-    # 最終決策大型卡片
     if latest["signal"]:
         status_html = "<div style='background: linear-gradient(135deg, #064e3b 0%, #022c22 100%); border: 1px solid #10b981; border-radius:16px; padding:25px; text-align:center; box-shadow: 0 0 20px rgba(16,185,129,0.2);'>" \
                       "<span style='color:#34d399; font-size:12px; font-weight:900; letter-spacing:2px;'>DECISION STATUS</span>" \
@@ -215,7 +176,6 @@ with right_col:
     st.markdown(status_html, unsafe_allowed_html=True)
     st.write("")
     
-    # 各項指標細節檢視卡片
     st.markdown("<h4 style='color:#94a3b8; font-weight:700; margin-bottom:15px;'>📋 策略條件檢視</h4>", unsafe_allowed_html=True)
     
     def render_row(label, val_str, cond):
