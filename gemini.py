@@ -13,11 +13,9 @@ STOCK_ID = st.sidebar.text_input("輸入台灣股票代號", value="2330").strip
 
 API_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# 抓取過去 365 天的歷史資料
+# 【修復點】將日期計算改為標準的乾淨一行，徹底避免語法與縮排誤判
 end_date = datetime.date.today().strftime("%Y-%m-%d")
-start_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime(
-    "%Y-%m-%d"
-)
+start_date = (datetime.date.today() - datetime.timedelta(days=365)).strftime("%Y-%m-%d")
 
 params = {
     "dataset": "TaiwanStockPrice",
@@ -34,16 +32,11 @@ except Exception as e:
     st.stop()
 
 if data.get("msg") != "success" or not data.get("data"):
-    st.error(
-        f"❌ 找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確，或該股票今天是否無交易。"
-    )
+    st.error(f"❌ 找不到股票代碼 【{STOCK_ID}】 的資料，請確認代碼是否正確。")
     st.stop()
 
 # 轉換為 DataFrame
 df = pd.DataFrame(data["data"])
-
-# 【除錯專用顯示】如果在部署時還有問題，這行會列出 API 給了什麼
-# st.write("原始欄位檢查：", list(df.columns))
 
 # 建立一個對照表，不管大小寫都對應到標準名稱
 mapping = {}
@@ -70,9 +63,7 @@ required_cols = ["Close", "Open", "High", "Low", "Volume", "date"]
 missing_cols = [c for c in required_cols if c not in df.columns]
 
 if missing_cols:
-    st.error(
-        f"❌ API 回傳資料異常！缺少關鍵欄位: {missing_cols}。無法進行策略計算。"
-    )
+    st.error(f"❌ API 回傳資料異常！缺少關鍵欄位: {missing_cols}")
     st.info(f"API 目前回傳的實際欄位為: {list(df.columns)}")
     st.stop()
 
@@ -85,9 +76,7 @@ df = df.sort_values("date").reset_index(drop=True)
 
 # 檢查歷史資料長度是否足夠
 if len(df) < 60:
-    st.warning(
-        f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 策略指標。"
-    )
+    st.warning(f"⚠️ 股票 {STOCK_ID} 的歷史交易天數不足 60 天（目前僅有 {len(df)} 天），無法計算 60MA 指標。")
     st.stop()
 
 # ==========================================
@@ -102,9 +91,7 @@ df["rsv_high"] = df["High"].rolling(window=9).max()
 df["rsv_low"] = df["Low"].rolling(window=9).min()
 
 # 避免除以 0 的安全保護
-df["rsv"] = (
-    (df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"] + 1e-8)
-) * 100
+df["rsv"] = ((df["Close"] - df["rsv_low"]) / (df["rsv_high"] - df["rsv_low"] + 1e-8)) * 100
 
 k_list = []
 d_list = []
@@ -128,7 +115,7 @@ df["d"] = d_list
 df = df.dropna().reset_index(drop=True)
 
 if df.empty:
-    st.error("❌ 指標計算後無有效數據，請確認該股票近期交易狀況。")
+    st.error("❌ 指標計算後無有效數據。")
     st.stop()
 
 # ==========================================
@@ -165,10 +152,8 @@ col3.metric("K 值 / D 值", f"{latest['k']:.2f} / {latest['d']:.2f}")
 
 st.markdown("### 【各項條件檢視】")
 
-
 def get_status_tag(cond):
     return "🟩 **PASS**" if cond else "🟥 **WAIT**"
-
 
 st.write(f"{get_status_tag(latest['cond_ma20'])} 1. 股價 > 20MA")
 st.write(f"{get_status_tag(latest['cond_ma60'])} 2. 股價 > 60MA")
